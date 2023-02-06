@@ -28,6 +28,7 @@ $(BUILD_DIR)/%.o: $(SRCS)
 .PHONY: clean run
 clean:
 	rm -rf $(BUILD_DIR) $(EXEC)
+	rm -f myoutput myerr
 
 run: $(EXEC)
 	./$(EXEC) $(ARGS)
