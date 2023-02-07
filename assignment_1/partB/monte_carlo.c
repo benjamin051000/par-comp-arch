@@ -192,6 +192,9 @@ void collect_results(const double* const result) {
     }
 }
 
+//------------------------------
+// Performance profiling
+//------------------------------
 double tdiff(const struct timespec start, const struct timespec stop) {
     return ( stop.tv_sec - start.tv_sec ) + ( stop.tv_nsec - start.tv_nsec ) / 1E9;
 }
