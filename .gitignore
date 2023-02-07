@@ -53,6 +53,4 @@ dkms.conf
 
 
 # Other stuff
-myoutput
-myerr
 core.*.ufhpc*
