@@ -38,6 +38,14 @@ void collect_results(const double* const);
 DBG(void test_rng(const double, const double);)
 
 
+//------------------------------
+// Performance profiling
+//------------------------------
+double tdiff(const struct timespec start, const struct timespec stop);
+struct timespec now();
+
+struct timespec start_time, stop_time;
+
 //==============================
 int main(int argc, char* argv[]) {
     MPI_Init(&argc, &argv);
@@ -49,9 +57,6 @@ int main(int argc, char* argv[]) {
 
     // Initialize different seeds to get better variance among workers
     init_rand_seed();
-
-    // Test ranges just to be sure they work correctly
-    DBG(test_rng(lower_bound, upper_bound);)
 
     // Run N estimations and send them to the master.
     double result = estimate_g(lower_bound, upper_bound, N);
@@ -142,6 +147,7 @@ double estimate_g(const double lower_bound, const double upper_bound, const long
     MPI_Comm_size(MPI_COMM_WORLD, &num_nodes);
     const int num_iterations = N / num_nodes;
 
+    start_time = now();
     return h_x(lower_bound, upper_bound, num_iterations);
 }
 
@@ -172,12 +178,27 @@ void collect_results(const double* const result) {
         // To take the mean, divide by num_nodes
         sum /= num_nodes;
 
+        stop_time = now();
+
         // print stats
         printf("Approximation: %f\n", sum);
+
+        const double elapsed_time = tdiff(start_time, stop_time);
+        printf("Elapsed time: %f\n", elapsed_time);
     }
     else {
         // Send data to master
         MPI_Send(result, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
     }
+}
+
+double tdiff(const struct timespec start, const struct timespec stop) {
+    return ( stop.tv_sec - start.tv_sec ) + ( stop.tv_nsec - start.tv_nsec ) / 1E9;
+}
+
+struct timespec now() {
+    struct timespec t;
+    clock_gettime(CLOCK_REALTIME, &t);
+    return t;
 }
 
