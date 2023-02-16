@@ -35,7 +35,7 @@ void* distribute_data(const int N, int (*matrix)[N]);
 
 void* mask_operation(const int N, int (*worker_submatrix)[N]);
 
-void collect_results(const int N, int (*updated_buf)[N], int* Ap);
+// void collect_results(const int N, int (*updated_buf)[N], int* Ap);
 
  
 //////////////////////////////
@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
 
     int (*worker_submatrix)[] = distribute_data(N, matrix);
     int (*processed_submatrix)[] = mask_operation(N, worker_submatrix);
-    collect_results(N, processed_submatrix, NULL);
+    // collect_results(N, processed_submatrix, NULL);
 
     MPI_Finalize();
     free(matrix);
@@ -132,6 +132,9 @@ void* initialize_data(const int N) {
     return matrix;
 }
 
+
+
+
 /**
 *
 */
@@ -154,34 +157,29 @@ void* distribute_data(const int N, int (*matrix)[N]) {
 
     // Number of elements to send to each processor
     int* const sendcounts = malloc(num_ranks * sizeof *sendcounts);
+
+    const int num_elems_per_worker = num_rows_per_worker * N; // N is num elems per row
+    printf("num_elems_per_worker=%d\n", num_elems_per_worker);
+
     for(int i = 0; i < num_ranks; i++) {
-        sendcounts[i] = num_rows_per_worker;
+        sendcounts[i] = num_elems_per_worker;
     }
 
     // Where should each chunk begin?
     // const int displs[] = {0, num_elems/2};
-    DBG(printf("[");)
+    DBG(printf("displacements: [");)
     int* const displs = malloc(num_ranks * sizeof *displs);
     for(int i = 0; i < num_ranks; i++) {
-        displs[i] = i * num_rows_per_worker;
+        displs[i] = i * num_elems_per_worker;
         DBG(printf("%d ", displs[i]);)
     }
     DBG(printf("]\n");)
 
-    // const int num_cols = N / num_ranks;
-    // const int recvbuf_size = sizeof(int[M][N]) / num_ranks;
     const int recvbuf_size = sizeof(int) * N * num_rows_per_worker;
-    // TODO how many elements should be in it ?
-    if(recvbuf_size / sizeof(int) != num_elems_per_worker) {
-        printf("ERROR: Size mismatch\n");
-        printf("recvbuf_size / sizeof(int)=%lu\n", recvbuf_size / sizeof(int));
-        printf("num_elems_per_worker=%d\n", num_elems_per_worker);
-        fflush(stdout);
-        MPI_Abort(MPI_COMM_WORLD, 2);
-    }
+    printf("recvbuf_size / sizeof(int)=%lu\n", recvbuf_size / sizeof(int));
+
 
     int (*recvbuf)[] = malloc(recvbuf_size);
-
     if(recvbuf == NULL) {
         printf("ERROR: Couldn't allocate recvbuf.\n");
         MPI_Abort(MPI_COMM_WORLD, 3);
@@ -189,6 +187,7 @@ void* distribute_data(const int N, int (*matrix)[N]) {
 
     DBG(printf("rank %d got here\n", my_rank);)
     MPI_Scatterv(matrix, sendcounts, displs, MPI_INT, recvbuf, num_elems_per_worker, MPI_INT, MASTER, MPI_COMM_WORLD);
+
     DBG(printf("rank %d got here\n", my_rank);)
 
     return recvbuf;
@@ -217,7 +216,7 @@ void* mask_operation(int N, int (*worker_submatrix)[N]) {
 /**
 *
 */
-void collect_results(int N, int (*updated_buf)[N], int* Ap) {
-
-}
-
+// void collect_results(int N, int (*updated_buf)[N], int* Ap) {
+//
+// }
+//

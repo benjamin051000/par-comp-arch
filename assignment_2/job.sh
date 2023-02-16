@@ -8,7 +8,7 @@
 #SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=500mb
+#SBATCH --mem-per-cpu=1000mb
 #SBATCH -t 00:01:00
 #SBATCH -o myout
 #SBATCH -e myerr
