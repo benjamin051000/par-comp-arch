@@ -5,6 +5,8 @@
 //////////////////////////////
 // Macros & Constants
 //////////////////////////////
+#define DEBUG
+
 #ifdef DEBUG
 #define DBG(x) x
 #else
@@ -27,11 +29,11 @@ void print_matrix(const int N, const int (* const matrix)[N]);
 //////////////////////////////
 void* initialize_data(const int N);
 
-int* distribute_data(const int N, int (*matrix)[N]);
+void* distribute_data(const int N, int (*matrix)[N]);
 
-int* mask_operation(int* recv_buf, int N);
+void* mask_operation(int N, int (*worker_submatrix)[N]);
 
-void collect_results(int* updated_buf, int N, int* Ap);
+void collect_results(int N, int (*updated_buf)[N], int* Ap);
 
  
 //////////////////////////////
@@ -43,9 +45,9 @@ int main(int argc, char* argv[]) {
     // Initialize the matrix
     int (*matrix)[N] = initialize_data(N);
 
-    int* temp1 = distribute_data(N, matrix);
-    int* temp2 = mask_operation(temp1, N);
-    collect_results(temp2, N, NULL);
+    int (*worker_submatrix)[N] = distribute_data(N, matrix);
+    int (*processed_submatrix)[N] = mask_operation(N, worker_submatrix);
+    collect_results(N, processed_submatrix, NULL);
 
     MPI_Finalize();
     free(matrix);
@@ -93,7 +95,7 @@ void* initialize_data(const int N) {
 
     if (matrix == NULL) {
         printf("ERROR: Couldn't allocate matrix.\n");
-        exit(EXIT_FAILURE);
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
     // seed the RNG
@@ -114,29 +116,47 @@ void* initialize_data(const int N) {
 /**
 *
 */
-int* distribute_data(const int N, int (*matrix)[N]) {
+void* distribute_data(const int N, int (*matrix)[N]) {
+    // This worker's rank
     int my_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-    if (my_rank != MASTER) {
-        return NULL;
-    }
+    // Total number of ranks.
+    int num_ranks;
+    MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
-    print_matrix(N, matrix);
+    const int num_elems = N * N;
 
-    return NULL;
+    const int num_elems_per_worker = num_elems / num_ranks;
+
+    // Number of elements to send to each processor
+    const int sendcounts[] = {num_elems_per_worker, num_elems_per_worker};
+
+    // Where should each chunk begin?
+    const int displs[] = {0, num_elems/2};
+
+    int (*recvbuf)[N] = malloc(sizeof(int[N][N/num_ranks]));
+
+    MPI_Scatterv(matrix, sendcounts, displs, MPI_INT, recvbuf, num_elems/2, MPI_INT, MASTER, MPI_COMM_WORLD);
+
+    return recvbuf;
+}
+
+/**
+* Perform the weighted-averaging filter.
+* For each element in the matrix, compute
+* the average of it and its 8 surrounding
+* neighbors.
+*
+* Note: Processing of edges is not required.
+*/
+void* mask_operation(int N, int (*worker_submatrix)[N]) {
+
 }
 
 /**
 *
 */
-int* mask_operation(int* recv_buf, int N) {
-
-}
-
-/**
-*
-*/
-void collect_results(int* updated_buf, int N, int* Ap) {
+void collect_results(int N, int (*updated_buf)[N], int* Ap) {
 
 }
 
