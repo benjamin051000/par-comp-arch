@@ -45,14 +45,15 @@ int main(int argc, char* argv[]) {
     const int N = atof(argv[1]);
 
     // Initialize the matrix
-    int (*matrix)[N] = initialize_data(N);
+    int (* const matrix)[N] = initialize_data(N);
 
-    int (*worker_submatrix)[N] = distribute_data(N, matrix);
-    int (*processed_submatrix)[N] = mask_operation(N, worker_submatrix);
+    int (*worker_submatrix)[] = distribute_data(N, matrix);
+    int (*processed_submatrix)[] = mask_operation(N, worker_submatrix);
     collect_results(N, processed_submatrix, NULL);
 
     MPI_Finalize();
     free(matrix);
+    // TODO BUG we are leaking the worker submatrices!
     return 0;
 }
 
@@ -126,7 +127,7 @@ void* initialize_data(const int N) {
         }
     }
 
-    print_matrix(N, N, (const int (*)[N])matrix);
+    DBG(print_matrix(M, N, (const int (*)[])matrix);)
 
     return matrix;
 }
@@ -141,21 +142,54 @@ void* distribute_data(const int N, int (*matrix)[N]) {
     // Total number of ranks.
     int num_ranks;
     MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
+    DBG(printf("rank %d of %d checking in\n", my_rank, num_ranks);)
 
-    const int num_elems = N * N;
+    const int M = N; // stay consistent with MxN matrix 
+    const int num_elems = M * N;
 
-    const int num_elems_per_worker = num_elems / num_ranks;
+    const int num_rows_per_worker = M / num_ranks;
+    DBG(printf("num_rows_per_worker=%d\n", num_rows_per_worker);)
+
+    // const int num_elems_per_worker = num_rows_per_worker * N;
 
     // Number of elements to send to each processor
-    const int sendcounts[] = {num_elems_per_worker, num_elems_per_worker};
+    int* const sendcounts = malloc(num_ranks * sizeof *sendcounts);
+    for(int i = 0; i < num_ranks; i++) {
+        sendcounts[i] = num_rows_per_worker;
+    }
 
     // Where should each chunk begin?
-    const int displs[] = {0, num_elems/2};
+    // const int displs[] = {0, num_elems/2};
+    DBG(printf("[");)
+    int* const displs = malloc(num_ranks * sizeof *displs);
+    for(int i = 0; i < num_ranks; i++) {
+        displs[i] = i * num_rows_per_worker;
+        DBG(printf("%d ", displs[i]);)
+    }
+    DBG(printf("]\n");)
 
-    const int num_cols = N / num_ranks;
-    int (*recvbuf)[num_cols] = malloc(sizeof(int[N][num_cols]));
+    // const int num_cols = N / num_ranks;
+    // const int recvbuf_size = sizeof(int[M][N]) / num_ranks;
+    const int recvbuf_size = sizeof(int) * N * num_rows_per_worker;
+    // TODO how many elements should be in it ?
+    if(recvbuf_size / sizeof(int) != num_elems_per_worker) {
+        printf("ERROR: Size mismatch\n");
+        printf("recvbuf_size / sizeof(int)=%lu\n", recvbuf_size / sizeof(int));
+        printf("num_elems_per_worker=%d\n", num_elems_per_worker);
+        fflush(stdout);
+        MPI_Abort(MPI_COMM_WORLD, 2);
+    }
 
-    MPI_Scatterv(matrix, sendcounts, displs, MPI_INT, recvbuf, num_elems/2, MPI_INT, MASTER, MPI_COMM_WORLD);
+    int (*recvbuf)[] = malloc(recvbuf_size);
+
+    if(recvbuf == NULL) {
+        printf("ERROR: Couldn't allocate recvbuf.\n");
+        MPI_Abort(MPI_COMM_WORLD, 3);
+    }
+
+    DBG(printf("rank %d got here\n", my_rank);)
+    MPI_Scatterv(matrix, sendcounts, displs, MPI_INT, recvbuf, num_elems_per_worker, MPI_INT, MASTER, MPI_COMM_WORLD);
+    DBG(printf("rank %d got here\n", my_rank);)
 
     return recvbuf;
 }
@@ -169,10 +203,13 @@ void* distribute_data(const int N, int (*matrix)[N]) {
 * Note: Processing of edges is not required.
 */
 void* mask_operation(int N, int (*worker_submatrix)[N]) {
+    int my_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     int num_ranks;
     MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
     const int num_rows = N / num_ranks;
+    printf("Rank %d:\n", my_rank);
     print_matrix(num_rows, N, (const int (*)[])worker_submatrix);
     return NULL;
 }
