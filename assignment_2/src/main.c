@@ -9,8 +9,10 @@
 
 #ifdef DEBUG
 #define DBG(x) x
+#define RELEASE(x)
 #else
 #define DBG(x)
+#define RELEASE(x) x
 #endif
 
 const int MASTER = 0;
@@ -22,7 +24,7 @@ const int FROM_WORKER = 0;
 //////////////////////////////
 int rand_range(const int min, const int max);
 
-void print_matrix(const int N, const int (* const matrix)[N]);
+void print_matrix(const int M, const int N, const int (* matrix)[M]);
 
 //////////////////////////////
 // Function declarations
@@ -31,9 +33,9 @@ void* initialize_data(const int N);
 
 void* distribute_data(const int N, int (*matrix)[N]);
 
-void* mask_operation(int N, int (*worker_submatrix)[N]);
+void* mask_operation(const int N, int (*worker_submatrix)[N]);
 
-void collect_results(int N, int (*updated_buf)[N], int* Ap);
+void collect_results(const int N, int (*updated_buf)[N], int* Ap);
 
  
 //////////////////////////////
@@ -65,9 +67,14 @@ int rand_range(const int min, const int max) {
     return (int) (((double)(diff + 1) / RAND_MAX) * rand() + min);
 }
 
-void print_matrix(const int N, const int (* const matrix)[N]) {
+/**
+ * Print an MxN matrix.
+ * M: rows
+ * N: cols
+ */
+void print_matrix(const int M, const int N, const int (* const matrix)[N]) {
     printf("=============== Matrix ===============\n");
-    for(int r = 0; r < N; r++) {
+    for(int r = 0; r < M; r++) {
         for(int c = 0; c < N; c++) {
             printf("%3d ", matrix[r][c]);
         }
@@ -91,7 +98,12 @@ void* initialize_data(const int N) {
     // Create the array
     // Using epic c99 array pointer syntax :D
     // see https://stackoverflow.com/questions/32050256/function-to-dynamically-allocate-matrix
-    int (*matrix)[N] = malloc(sizeof(int[N][N]));
+    //
+    // NOTE: The type declaration needs cols in the square brackets. So it's `int (*)[num_cols]`.
+    // sizeof doesn't matter because it just makes a block
+
+    const int M = N; // For consistency with MxN matrices.
+    int (*matrix)[N] = malloc(sizeof(int[M][N]));
 
     if (matrix == NULL) {
         printf("ERROR: Couldn't allocate matrix.\n");
@@ -102,13 +114,19 @@ void* initialize_data(const int N) {
     srand(1);
 
     // Populate the matrix with random numbers
-    for(int r = 0; r < N; r++) {
+    for(int r = 0; r < M; r++) {
         for(int c = 0; c < N; c++) {
-            matrix[r][c] = rand_range(0, 255);
+            DBG(
+                // Makes it easier to tell matrix is populated correctly
+                matrix[r][c] = r * N + c;
+            )
+            RELEASE(
+                matrix[r][c] = rand_range(0, 255);
+            )
         }
     }
 
-    print_matrix(N, matrix);
+    print_matrix(N, N, (const int (*)[N])matrix);
 
     return matrix;
 }
@@ -134,7 +152,8 @@ void* distribute_data(const int N, int (*matrix)[N]) {
     // Where should each chunk begin?
     const int displs[] = {0, num_elems/2};
 
-    int (*recvbuf)[N] = malloc(sizeof(int[N][N/num_ranks]));
+    const int num_cols = N / num_ranks;
+    int (*recvbuf)[num_cols] = malloc(sizeof(int[N][num_cols]));
 
     MPI_Scatterv(matrix, sendcounts, displs, MPI_INT, recvbuf, num_elems/2, MPI_INT, MASTER, MPI_COMM_WORLD);
 
@@ -150,7 +169,12 @@ void* distribute_data(const int N, int (*matrix)[N]) {
 * Note: Processing of edges is not required.
 */
 void* mask_operation(int N, int (*worker_submatrix)[N]) {
+    int num_ranks;
+    MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
+    const int num_rows = N / num_ranks;
+    print_matrix(num_rows, N, (const int (*)[])worker_submatrix);
+    return NULL;
 }
 
 /**
