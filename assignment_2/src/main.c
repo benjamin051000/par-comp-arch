@@ -30,9 +30,11 @@ void print_matrix(const int M, const int N, const int (* matrix)[M]);
 //////////////////////////////
 // Structures
 //////////////////////////////
-struct recvbuf_and_size {
-    void* recvbuf;
+struct matrix {
+    void* buf;
     int size;
+    int M;
+    int N;
 };
 
 struct sendcounts_displacements {
@@ -45,11 +47,11 @@ struct sendcounts_displacements {
 //////////////////////////////
 void* initialize_data(const int N);
 
-struct recvbuf_and_size distribute_data(const int N, int (*matrix)[N]);
+struct matrix distribute_data(const int N, int (*matrix)[N]);
 
-void* mask_operation(const int N, const int worker_submatrix_size, int (*worker_submatrix)[N]);
+struct matrix mask_operation(const int N, const int worker_submatrix_size, int (*worker_submatrix)[N]);
 
-// void collect_results(const int N, int (*updated_buf)[N], int* Ap);
+void collect_results(const int M, const int N, struct matrix worker_submatrix);
 
  
 //////////////////////////////
@@ -62,12 +64,12 @@ int main(int argc, char* argv[]) {
     int (* const matrix)[N] = initialize_data(N);
 
     // int (*worker_submatrix)[] = distribute_data(N, matrix);
-    struct recvbuf_and_size r_s = distribute_data(N, matrix);
-    int (* const worker_submatrix)[] = r_s.recvbuf;
+    struct matrix r_s = distribute_data(N, matrix);
+    int (* const worker_submatrix)[] = r_s.buf;
     const int worker_submatrix_size = r_s.size;
 
-    int (*processed_submatrix)[] = mask_operation(N, worker_submatrix_size, worker_submatrix);
-    // collect_results(N, processed_submatrix, NULL);
+    struct matrix results = mask_operation(N, worker_submatrix_size, worker_submatrix);
+    collect_results(N, N, results);
 
     MPI_Finalize();
     free(worker_submatrix);
@@ -170,7 +172,6 @@ struct sendcounts_displacements generate_sendcounds_and_displacements(
     // Total number of data assigned to workers
     int sum = 0;
 
-    // TODO Add additional rows for offsets!
     for(int rank = 0; rank < num_ranks; rank++) {
         // The buffer technically must be number of rows * elements per row
         sendcounts[rank] = num_rows_per_worker * N;
@@ -239,7 +240,7 @@ struct sendcounts_displacements generate_sendcounds_and_displacements(
 }
 
 
-struct recvbuf_and_size distribute_data(const int N, int (*matrix)[N]) {
+struct matrix distribute_data(const int N, int (*matrix)[N]) {
     // This worker's rank
     int my_rank; MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     // Total number of ranks.
@@ -286,9 +287,11 @@ struct recvbuf_and_size distribute_data(const int N, int (*matrix)[N]) {
     free(sendcounts);
     free(displacements);
 
-    return (struct recvbuf_and_size) {
+    return (struct matrix) {
         recvbuf,
-        recvbuf_size
+        recvbuf_size,
+        .M = M,
+        .N = N
     };
 }
 
@@ -300,7 +303,7 @@ struct recvbuf_and_size distribute_data(const int N, int (*matrix)[N]) {
 *
 * Note: Processing of top, bottom, left, and right edges is not required.
 */
-void* mask_operation(int N, const int worker_submatrix_size, int (*worker_submatrix)[N]) {
+struct matrix mask_operation(int N, const int worker_submatrix_size, int (*worker_submatrix)[N]) {
     int my_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     int num_ranks;
@@ -360,13 +363,58 @@ void* mask_operation(int N, const int worker_submatrix_size, int (*worker_submat
     DBG(printf("[rank %d] resulting matrix:\n", my_rank);)
     DBG(print_matrix(resulting_num_rows, resulting_num_cols, (const int (*)[])results);)
 
-    return results;
+    return (struct matrix) {
+        results,
+        resulting_num_rows * resulting_num_cols,
+        .M = resulting_num_rows,
+        .N = resulting_num_cols
+    };
 }
 
 /**
 *
 */
-// void collect_results(int N, int (*updated_buf)[N], int* Ap) {
-//
-// }
-//
+void collect_results(const int M, const int N, struct matrix worker_submatrix) {
+
+    int my_rank; MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    int num_ranks; MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
+
+    // Number of rows to send to each processor, assuming they can be divided evenly.
+    const int num_rows_per_worker = M / num_ranks;
+    
+    // TODO pass these around so we don't need to regenerate them.
+    // TODO this probably won't work. we may need to choose different offsets. Not sure. Maybe not.
+    struct sendcounts_displacements s_d = generate_sendcounds_and_displacements(num_ranks, M, N, num_rows_per_worker);
+    const int* const sendcounts = s_d.sendcounts;
+    const int* const displs = s_d.displacements;
+
+    int (*result_matrix)[N] = malloc(sizeof(int[M][N]));
+    if (result_matrix == NULL) {
+        printf("ERROR: Couldn't malloc result_matrix.\n");
+        MPI_Abort(MPI_COMM_WORLD, 5);
+    }
+
+    MPI_Gatherv(
+        worker_submatrix.buf, // worker matrix to be sent to master.
+        sendcounts[my_rank], 
+        MPI_INT,
+        result_matrix, // master's collection buffer
+        sendcounts,
+        displs,
+        MPI_INT,
+        MASTER,
+        MPI_COMM_WORLD
+    );
+
+    // Non-master ranks are done.
+    if (my_rank != MASTER) {
+        return;
+    }
+
+    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+    printf("Final result:\n");
+    print_matrix(M-2, N, (const int (*)[]) result_matrix);
+    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+    printf("Goodbye.\n");
+}
+
