@@ -314,36 +314,53 @@ void* mask_operation(int N, const int worker_submatrix_size, int (*worker_submat
     printf("N: %d\n", N);
     print_matrix(M, N, (const int (*)[])worker_submatrix);
 
+    
+
     // Get the coords of which results need to be calculated.
     // The first and last rows are only used for neighbor calculations.
-    int startx = 1;
-    int endx = M - 1;
-    // Everyone skips first and last columns
+    const int startx = 1;
+    const int endx = M - 1;
+    const int resulting_num_rows = endx - startx;
+    // First and last columns skipped for same reason.
     const int starty = 1;
     const int endy = N - 1; 
+    const int resulting_num_cols = N; // Preserve same number of cols as before
 
+    // Create the output subatrix. Make it 2 rows smaller than 
+    // the incoming one since we don't need those two rows.
+    int (*results)[resulting_num_cols] = calloc(resulting_num_rows * resulting_num_cols, sizeof(int));
+    if (results == NULL) {
+        printf("ERROR: Couldn't allocate results.\n");
+        MPI_Abort(MPI_COMM_WORLD, 4);
+    }
 
-    for(int x = startx; x <= endx; x++) {
-        for(int y = starty; y <= endy; y++) {
+    for(int x = startx; x < endx; x++) {
+        for(int y = starty; y < endy; y++) {
             const int data = worker_submatrix[x][y];
-            DBG(printf("[rank %d] Working on submat[%d][%d] (which is %d)...\n", my_rank, x, y, data);)
+            // DBG(printf("[rank %d] Working on submat[%d][%d] (which is %d)...\n", my_rank, x, y, data);)
 
-            // Add the 3x3 square together
+            // Add the 3x3 square of neighbors (hence "nx" "ny") together
             int sum = 0;
             for(int nx = x - 1; nx <= x + 1; nx++) {
                 for(int ny = y - 1; ny <= y + 1; ny++) {
-                    sum += worker_submatrix[nx][ny];
+                    sum += data;
                 }
             }
 
             const int average = sum / 10;
-            printf("[rank %d] Average for tile: %d\n", my_rank, average);
+
+            // Shift one row up, but maintain the column relative to the original.
+            results[x-1][y] = average; // Save to results
+
+            // DBG(printf("[rank %d] Average for tile: %d\n", my_rank, results[x-1][y-1]);)
 
         } // end of for c
     } // end of for r
 
-    // TODO return a new matrix, in the same exact shape as before
-    return NULL;
+    DBG(printf("[rank %d] resulting matrix:\n", my_rank);)
+    DBG(print_matrix(resulting_num_rows, resulting_num_cols, (const int (*)[])results);)
+
+    return results;
 }
 
 /**
