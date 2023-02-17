@@ -138,13 +138,13 @@ void* initialize_data(const int N) {
     // Populate the matrix with random numbers
     for(int r = 0; r < M; r++) {
         for(int c = 0; c < N; c++) {
-            DBG(
+            // DBG(
                 // Makes it easier to tell matrix is populated correctly
-                matrix[r][c] = r * N + c;
-            )
-            RELEASE(
+                // matrix[r][c] = r * N + c;
+            // )
+            // RELEASE(
                 matrix[r][c] = rand_range(0, 255);
-            )
+            // )
         }
     }
 
