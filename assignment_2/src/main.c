@@ -170,19 +170,50 @@ struct sendcounts_displacements generate_sendcounds_and_displacements(
     // Total number of data assigned to workers
     int sum = 0;
 
-    for(int i = 0; i < num_ranks; i++) {
+    // TODO Add additional rows for offsets!
+    for(int rank = 0; rank < num_ranks; rank++) {
         // The buffer technically must be number of rows * elements per row
-        sendcounts[i] = num_rows_per_worker * N;
+        sendcounts[rank] = num_rows_per_worker * N;
 
         if (remainder) {
             // Give one extra row to this worker.
-            sendcounts[i] += N;
+            sendcounts[rank] += N;
             // One less to worry about 
             remainder--;
         }
 
-        displacements[i] = sum;
-        sum += sendcounts[i];
+        displacements[rank] = sum;
+
+        // int my_rank; MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+
+        // Add one additional row above and one below for neighboring purposes.
+        // Master rank only: Don't add another row above because there isn't one.
+        // You already have the first row, just don't calculate it.
+        if (rank != MASTER) {
+            // For other ranks, add a row above.
+            sendcounts[rank] += N;
+
+            // Sum shouldn't include the extra rows used for neighboring tiles.
+            sum -= N;
+
+            // Displacements should be shifted down by one row to accomodate for this.
+            displacements[rank] -= N;
+        }
+
+        // Last rank only: Don't add another row below because there isn't one.
+        // You already have the last row, just don't calculate it.
+        if (rank != num_ranks - 1) {
+            // For other ranks, add a row below.
+            sendcounts[rank] += N;
+            // No need to shift displacements since this was added to the end.
+
+            // Sum shouldn't include the extra rows used for neighboring tiles.
+            sum -= N;
+        }
+
+        // Sum shouldn't include the extra rows used for neighboring tiles.
+        // This has already been accounted for!
+        sum += sendcounts[rank];
     }
 
     DBG(
@@ -267,7 +298,7 @@ struct recvbuf_and_size distribute_data(const int N, int (*matrix)[N]) {
 * the average of it and its 8 surrounding
 * neighbors.
 *
-* Note: Processing of edges is not required.
+* Note: Processing of top, bottom, left, and right edges is not required.
 */
 void* mask_operation(int N, const int worker_submatrix_size, int (*worker_submatrix)[N]) {
     int my_rank;
@@ -276,13 +307,42 @@ void* mask_operation(int N, const int worker_submatrix_size, int (*worker_submat
     MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
     // Get num rows, but round up to nearest row.
-    const int num_rows = (worker_submatrix_size + (N - 1)) / N;
+    const int M = (worker_submatrix_size + (N - 1)) / N;
 
     printf("Rank %d:\n", my_rank);
     printf("worker submatrix size: %d\n", worker_submatrix_size);
     printf("N: %d\n", N);
-    print_matrix(num_rows, N, (const int (*)[])worker_submatrix);
+    print_matrix(M, N, (const int (*)[])worker_submatrix);
 
+    // Get the coords of which results need to be calculated.
+    // The first and last rows are only used for neighbor calculations.
+    int startx = 1;
+    int endx = M - 1;
+    // Everyone skips first and last columns
+    const int starty = 1;
+    const int endy = N - 1; 
+
+
+    for(int x = startx; x <= endx; x++) {
+        for(int y = starty; y <= endy; y++) {
+            const int data = worker_submatrix[x][y];
+            DBG(printf("[rank %d] Working on submat[%d][%d] (which is %d)...\n", my_rank, x, y, data);)
+
+            // Add the 3x3 square together
+            int sum = 0;
+            for(int nx = x - 1; nx <= x + 1; nx++) {
+                for(int ny = y - 1; ny <= y + 1; ny++) {
+                    sum += worker_submatrix[nx][ny];
+                }
+            }
+
+            const int average = sum / 10;
+            printf("[rank %d] Average for tile: %d\n", my_rank, average);
+
+        } // end of for c
+    } // end of for r
+
+    // TODO return a new matrix, in the same exact shape as before
     return NULL;
 }
 
