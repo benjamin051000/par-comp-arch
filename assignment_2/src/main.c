@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "mpi.h"
 
 //////////////////////////////
@@ -27,13 +28,26 @@ int rand_range(const int min, const int max);
 void print_matrix(const int M, const int N, const int (* matrix)[M]);
 
 //////////////////////////////
+// Structures
+//////////////////////////////
+struct recvbuf_and_size {
+    void* recvbuf;
+    int size;
+};
+
+struct sendcounts_displacements {
+    int* sendcounts;
+    int* displacements;
+};
+
+//////////////////////////////
 // Function declarations
 //////////////////////////////
 void* initialize_data(const int N);
 
-void* distribute_data(const int N, int (*matrix)[N]);
+struct recvbuf_and_size distribute_data(const int N, int (*matrix)[N]);
 
-void* mask_operation(const int N, int (*worker_submatrix)[N]);
+void* mask_operation(const int N, const int worker_submatrix_size, int (*worker_submatrix)[N]);
 
 // void collect_results(const int N, int (*updated_buf)[N], int* Ap);
 
@@ -47,13 +61,18 @@ int main(int argc, char* argv[]) {
     // Initialize the matrix
     int (* const matrix)[N] = initialize_data(N);
 
-    int (*worker_submatrix)[] = distribute_data(N, matrix);
-    int (*processed_submatrix)[] = mask_operation(N, worker_submatrix);
+    // int (*worker_submatrix)[] = distribute_data(N, matrix);
+    struct recvbuf_and_size r_s = distribute_data(N, matrix);
+    int (* const worker_submatrix)[] = r_s.recvbuf;
+    const int worker_submatrix_size = r_s.size;
+
+    int (*processed_submatrix)[] = mask_operation(N, worker_submatrix_size, worker_submatrix);
     // collect_results(N, processed_submatrix, NULL);
 
     MPI_Finalize();
+    free(worker_submatrix);
     free(matrix);
-    // TODO BUG we are leaking the worker submatrices!
+
     return 0;
 }
 
@@ -133,64 +152,113 @@ void* initialize_data(const int N) {
 }
 
 
+// TODO extract a "divide evenly" function to make this easier to understand
+struct sendcounts_displacements generate_sendcounds_and_displacements(
+    const int num_ranks, 
+    const int M, // num rows
+    const int N, // AKA num elements per row, or num cols
+    const int num_rows_per_worker
+) {
+    const int sendcounts_size = num_ranks * sizeof(int);
+    int* const sendcounts = malloc(sendcounts_size);
+    int* const displacements = malloc(num_ranks * sizeof *displacements);
+
+    // Keeps track of odd-numbered matrices, to ensure each row
+    // is placed in a worker's group.
+    int remainder = M % num_ranks;
+
+    // Total number of data assigned to workers
+    int sum = 0;
+
+    for(int i = 0; i < num_ranks; i++) {
+        // The buffer technically must be number of rows * elements per row
+        sendcounts[i] = num_rows_per_worker * N;
+
+        if (remainder) {
+            // Give one extra row to this worker.
+            sendcounts[i] += N;
+            // One less to worry about 
+            remainder--;
+        }
+
+        displacements[i] = sum;
+        sum += sendcounts[i];
+    }
+
+    DBG(
+        printf("sendcounts (# rows): [ ");
+        for(int i = 0; i < num_ranks; i++) {
+            printf("%d ", sendcounts[i] / N);
+        }
+        printf("]\n");
+    )
+
+    DBG(
+        printf("displacements: [ ");
+        for(int i = 0; i < num_ranks; i++) {
+            printf("%d ", displacements[i]);
+        }
+        printf("]\n");
+    )
+    
+    return (struct sendcounts_displacements) {
+        sendcounts,
+        displacements
+    };
+}
 
 
-/**
-*
-*/
-void* distribute_data(const int N, int (*matrix)[N]) {
+struct recvbuf_and_size distribute_data(const int N, int (*matrix)[N]) {
     // This worker's rank
-    int my_rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    int my_rank; MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     // Total number of ranks.
-    int num_ranks;
-    MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
+    int num_ranks; MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
+
     DBG(printf("rank %d of %d checking in\n", my_rank, num_ranks);)
 
     const int M = N; // stay consistent with MxN matrix 
     const int num_elems = M * N;
 
+    // Number of elements to send to each processor, assuming it divides evenly.
+    const int num_elems_per_worker = num_elems / num_ranks; // N is num elems per row
+    // Number of rows to send to each processor, assuming they can be divided evenly.
     const int num_rows_per_worker = M / num_ranks;
-    DBG(printf("num_rows_per_worker=%d\n", num_rows_per_worker);)
+    DBG(printf("num_elems_per_worker=%d\n", num_elems_per_worker);)
 
-    // const int num_elems_per_worker = num_rows_per_worker * N;
+    struct sendcounts_displacements s_d = generate_sendcounds_and_displacements(num_ranks, M, N, num_rows_per_worker);
+    int* const sendcounts = s_d.sendcounts;
+    int* const displacements = s_d.displacements;
 
-    // Number of elements to send to each processor
-    int* const sendcounts = malloc(num_ranks * sizeof *sendcounts);
+    // Each buffer size varies based off what was allotted for this rank.
+    const int recvbuf_size = sendcounts[my_rank];
+    DBG(printf("rank %d recvbuf_size = %d\n", my_rank, recvbuf_size);)
 
-    const int num_elems_per_worker = num_rows_per_worker * N; // N is num elems per row
-    printf("num_elems_per_worker=%d\n", num_elems_per_worker);
-
-    for(int i = 0; i < num_ranks; i++) {
-        sendcounts[i] = num_elems_per_worker;
-    }
-
-    // Where should each chunk begin?
-    // const int displs[] = {0, num_elems/2};
-    DBG(printf("displacements: [");)
-    int* const displs = malloc(num_ranks * sizeof *displs);
-    for(int i = 0; i < num_ranks; i++) {
-        displs[i] = i * num_elems_per_worker;
-        DBG(printf("%d ", displs[i]);)
-    }
-    DBG(printf("]\n");)
-
-    const int recvbuf_size = sizeof(int) * N * num_rows_per_worker;
-    printf("recvbuf_size / sizeof(int)=%lu\n", recvbuf_size / sizeof(int));
-
-
-    int (*recvbuf)[] = malloc(recvbuf_size);
+    int (* const recvbuf)[N] = malloc(recvbuf_size * sizeof **recvbuf);
     if(recvbuf == NULL) {
         printf("ERROR: Couldn't allocate recvbuf.\n");
         MPI_Abort(MPI_COMM_WORLD, 3);
     }
 
-    DBG(printf("rank %d got here\n", my_rank);)
-    MPI_Scatterv(matrix, sendcounts, displs, MPI_INT, recvbuf, num_elems_per_worker, MPI_INT, MASTER, MPI_COMM_WORLD);
+    MPI_Scatterv(
+        matrix, // ref to original data
+        sendcounts,
+        displacements,
+        MPI_INT,
+        recvbuf, // ref to receive buf
+        recvbuf_size, // number of elements in receive buffer
+        MPI_INT,
+        MASTER, // who is doing the sending
+        MPI_COMM_WORLD
+    );
 
-    DBG(printf("rank %d got here\n", my_rank);)
+    // Done with these (?)
+    free(sendcounts);
+    free(displacements);
 
-    return recvbuf;
+    return (struct recvbuf_and_size) {
+        recvbuf,
+        recvbuf_size
+    };
 }
 
 /**
@@ -201,15 +269,20 @@ void* distribute_data(const int N, int (*matrix)[N]) {
 *
 * Note: Processing of edges is not required.
 */
-void* mask_operation(int N, int (*worker_submatrix)[N]) {
+void* mask_operation(int N, const int worker_submatrix_size, int (*worker_submatrix)[N]) {
     int my_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     int num_ranks;
     MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
-    const int num_rows = N / num_ranks;
+    // Get num rows, but round up to nearest row.
+    const int num_rows = (worker_submatrix_size + (N - 1)) / N;
+
     printf("Rank %d:\n", my_rank);
+    printf("worker submatrix size: %d\n", worker_submatrix_size);
+    printf("N: %d\n", N);
     print_matrix(num_rows, N, (const int (*)[])worker_submatrix);
+
     return NULL;
 }
 
