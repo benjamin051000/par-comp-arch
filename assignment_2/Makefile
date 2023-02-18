@@ -1,6 +1,6 @@
 # Mostly from makefiletutorial.com
 EXEC := weighted_avg_filter
-CFLAGS := -O0 -Wall -Wextra -Wunused -Wshadow -pedantic -Wwrite-strings -std=c99
+CFLAGS := -O0 -Wall -Wextra -Wunused -Wshadow -pedantic -Wwrite-strings
 ARGS := ""
 CC := "mpicc"
 

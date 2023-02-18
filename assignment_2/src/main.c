@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "mpi.h"
 
 //////////////////////////////
@@ -52,6 +53,11 @@ struct matrix distribute_data(const int N, int (*matrix)[N]);
 struct matrix mask_operation(const int N, const int worker_submatrix_size, int (*worker_submatrix)[N]);
 
 void collect_results(const int M, const int N, struct matrix worker_submatrix);
+
+// Performance Profiling
+double tdiff(const struct timespec start, const struct timespec stop);
+struct timespec now(void);
+struct timespec start_time, stop_time;
 
  
 //////////////////////////////
@@ -283,6 +289,9 @@ struct matrix distribute_data(const int N, int (*matrix)[N]) {
         MPI_COMM_WORLD
     );
 
+    // start the clock.
+    start_time = now();
+
     // Done with these (?)
     free(sendcounts);
     free(displacements);
@@ -315,7 +324,7 @@ struct matrix mask_operation(int N, const int worker_submatrix_size, int (*worke
     printf("Rank %d:\n", my_rank);
     printf("worker submatrix size: %d\n", worker_submatrix_size);
     printf("N: %d\n", N);
-    print_matrix(M, N, (const int (*)[])worker_submatrix);
+    DBG(print_matrix(M, N, (const int (*)[])worker_submatrix);)
 
     
 
@@ -406,6 +415,8 @@ void collect_results(const int M, const int N, struct matrix worker_submatrix) {
         MPI_COMM_WORLD
     );
 
+    stop_time = now();
+
     // Non-master ranks are done.
     if (my_rank != MASTER) {
         return;
@@ -415,6 +426,23 @@ void collect_results(const int M, const int N, struct matrix worker_submatrix) {
     printf("Final result:\n");
     print_matrix(M-2, N, (const int (*)[]) result_matrix);
     printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+
+    double elapsed = tdiff(start_time, stop_time);
+    printf("Total elapsed time: %f\n", elapsed);
+
     printf("Goodbye.\n");
+}
+
+//------------------------------
+// Performance profiling
+//------------------------------
+double tdiff(const struct timespec start, const struct timespec stop) {
+    return ( stop.tv_sec - start.tv_sec ) + ( stop.tv_nsec - start.tv_nsec ) / 1E9;
+}
+
+struct timespec now(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_REALTIME, &t);
+    return t;
 }
 
