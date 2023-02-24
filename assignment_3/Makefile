@@ -1,8 +1,12 @@
 # Mostly from makefiletutorial.com
 EXEC := matmult
-CFLAGS := -qopenmp -O0 -Wall -Wextra -Wunused -Wshadow -pedantic -Wwrite-strings
+# For MPI+openmp, use `-qopenmp`
+# For just openmp, use -fopenmp
+CFLAGS := -fopenmp -O0 -Wall -Wextra -Wunused -Wshadow -pedantic -Wwrite-strings
 ARGS := ""
-CC := "mpicc"
+# For MPI+openmp, use "mpicc"
+# For just openmp, use "gcc"
+CC := "gcc"
 
 BUILD_DIR := ./build
 SRC_DIRS := ./src

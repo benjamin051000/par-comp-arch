@@ -54,3 +54,6 @@ dkms.conf
 
 # Other stuff
 core.*.ufhpc*
+# SLURM output
+out.txt
+err.txt

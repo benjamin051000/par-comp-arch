@@ -11,4 +11,5 @@
 export OMP_NUM_THREADS=4
 #(NRA, NCA_RB, NCB)
 ./matmult 60 12 10
+#(./matmult 200 200 200)
 
