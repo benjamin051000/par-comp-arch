@@ -114,8 +114,9 @@ int main(int argc, char* argv[]) {
         for (int r = 0; r < NRA; r++) {
             for (int c = 0; c < NCB; c++) {
                 // Not sure what this inner loop is for 
+                C[r][c] = 0;
                 for (int k = 0; k < NCA_RB; k++) {
-                    C[r][c] = A[r][k] * B[k][c];
+                    C[r][c] += A[r][k] * B[k][c];
                 }
             } // end of for col
         } // end of for row
